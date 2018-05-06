@@ -26,12 +26,21 @@ def run_emacs(prog):
 
 
 def get_value(name):
-    prog = "(print (car (custom-variable-theme-value '%s)))" % name
+    prog = """
+        (print
+            (let ((val (custom-variable-theme-value '%s)))
+                (if val
+                    (car val)
+                    'ANSIBLE-UNSET-SENTINEL))))
+    """.strip() % name
     (proc, stdout, stderr) = run_emacs(prog)
     if proc.returncode != 0:
         raise ValueError("Error from emacs, exitcode=%s, stderr=%s" % (proc.returncode, stderr))
 
-    return stdout.strip()
+    out = stdout.strip()
+    if out == "ANSIBLE-UNSET-SENTINEL":
+        out = None
+    return out
 
 
 def set_value(name, value):
