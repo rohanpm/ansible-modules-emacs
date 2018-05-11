@@ -10,6 +10,13 @@ import getpass
 from ansible.module_utils.basic import AnsibleModule
 
 
+class EmacsError(RuntimeError):
+    def __init__(self, returncode, stderr, message=None):
+        super(EmacsError, self).__init__(message or 'emacs failed')
+        self.returncode = returncode
+        self.stderr = stderr
+
+
 def run_emacs(prog):
     command = [
         'emacs',
@@ -35,7 +42,7 @@ def get_value(name):
     """.strip() % name
     (proc, stdout, stderr) = run_emacs(prog)
     if proc.returncode != 0:
-        raise ValueError("Error from emacs, exitcode=%s, stderr=%s" % (proc.returncode, stderr))
+        raise EmacsError(proc.returncode, stderr)
 
     out = stdout.strip()
     if out == "ANSIBLE-UNSET-SENTINEL":
@@ -47,7 +54,15 @@ def set_value(name, value):
     prog = "(customize-save-variable '%s %s)" % (name, value)
     (proc, _, stderr) = run_emacs(prog)
     if proc.returncode != 0:
-        raise ValueError("Error from emacs, exitcode=%s, stderr=%s" % (proc.returncode, stderr))
+        raise EmacsError(proc.returncode, stderr)
+
+
+def canonicalize(value):
+    prog = "(print '%s)" % value
+    (proc, stdout, stderr) = run_emacs(prog)
+    if proc.returncode != 0:
+        raise EmacsError(proc.returncode, stderr)
+    return stdout.strip()
 
 
 def run_module():
@@ -62,18 +77,27 @@ def run_module():
         supports_check_mode=True
     )
 
-    old_value = get_value(module.params['name'])
-    result['old_value'] = old_value
-    if old_value != module.params['value']:
-        result['changed'] = True
+    try:
+        new_value = canonicalize(module.params['value'])
+        result['new_value'] = new_value
 
-    if module.check_mode:
-        return result
+        old_value = get_value(module.params['name'])
+        result['old_value'] = old_value
+        if old_value != new_value:
+            result['changed'] = True
 
-    if result['changed']:
-        set_value(module.params['name'], module.params['value'])
+        if module.check_mode:
+            return result
 
-    module.exit_json(**result)
+        if result['changed']:
+            set_value(module.params['name'], new_value)
+
+        module.exit_json(**result)
+    except EmacsError as err:
+        result['emacs_returncode'] = err.returncode
+        result['emacs_stderr'] = err.stderr
+        result['msg'] = err.message
+        module.fail_json(**result)
 
 
 def main():
