@@ -11,10 +11,11 @@ from ansible.module_utils.basic import AnsibleModule
 
 
 class EmacsError(RuntimeError):
-    def __init__(self, returncode, stderr, message=None):
+    def __init__(self, returncode, stderr, message=None, command=None):
         super(EmacsError, self).__init__(message or 'emacs failed')
         self.returncode = returncode
         self.stderr = stderr
+        self.command = command
 
 
 def run_emacs(prog):
@@ -29,7 +30,7 @@ def run_emacs(prog):
     ]
     proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     (stdout, stderr) = proc.communicate()
-    return (proc, stdout, stderr)
+    return (proc, stdout, stderr, command)
 
 
 def get_value(name):
@@ -38,11 +39,11 @@ def get_value(name):
             (let ((val (custom-variable-theme-value '%s)))
                 (if val
                     (car val)
-                    'ANSIBLE-UNSET-SENTINEL))))
+                    'ANSIBLE-UNSET-SENTINEL)))
     """.strip() % name
-    (proc, stdout, stderr) = run_emacs(prog)
+    (proc, stdout, stderr, command) = run_emacs(prog)
     if proc.returncode != 0:
-        raise EmacsError(proc.returncode, stderr)
+        raise EmacsError(proc.returncode, stderr, command)
 
     out = stdout.strip()
     if out == "ANSIBLE-UNSET-SENTINEL":
@@ -52,16 +53,16 @@ def get_value(name):
 
 def set_value(name, value):
     prog = "(customize-save-variable '%s %s)" % (name, value)
-    (proc, _, stderr) = run_emacs(prog)
+    (proc, _, stderr, command) = run_emacs(prog)
     if proc.returncode != 0:
-        raise EmacsError(proc.returncode, stderr)
+        raise EmacsError(proc.returncode, stderr, command)
 
 
 def canonicalize(value):
     prog = "(print '%s)" % value
-    (proc, stdout, stderr) = run_emacs(prog)
+    (proc, stdout, stderr, command) = run_emacs(prog)
     if proc.returncode != 0:
-        raise EmacsError(proc.returncode, stderr)
+        raise EmacsError(proc.returncode, stderr, command)
     return stdout.strip()
 
 
@@ -96,6 +97,7 @@ def run_module():
     except EmacsError as err:
         result['emacs_returncode'] = err.returncode
         result['emacs_stderr'] = err.stderr
+        result['emacs_command'] = err.command
         result['msg'] = err.message
         module.fail_json(**result)
 
